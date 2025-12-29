@@ -20,6 +20,7 @@ extern "C"
 // libvgm-emu headers for configuration
 #include <emu/EmuCores.h>
 #include <emu/EmuStructs.h>	// for DEVRI_SRMODE_* constants
+#include <emu/SoundEmu.h>	// for SndEmu_GetDevDecl()
 #include <emu/cores/2612intf.h>
 #include <emu/cores/ayintf.h>
 #include <emu/cores/gb.h>
@@ -50,7 +51,7 @@ static INT16 ReadIniDef_SIntSht(const char* section, const char* key, INT16 defa
 static UINT8 ReadIniDef_IntByte(const char* section, const char* key, UINT8 default);
 static bool ReadIniDef_Boolean(const char* section, const char* key, bool default);
 static float ReadIniDef_Float(const char* section, const char* key, float default);
-UINT32 EmuTypeNum2CoreFCC(UINT8 chipType, UINT8 emuType, bool* isSubType);
+UINT32 EmuTypeNum2CoreFCC(UINT8 chipType, UINT8 emuType);
 
 void LoadConfiguration(PluginConfig& pCfg, const char* iniFileName);
 static void LoadCfg_General(GeneralOptions& opts);
@@ -175,10 +176,8 @@ static float ReadIniDef_Float(const char* section, const char* key, float defaul
 }
 
 
-UINT32 EmuTypeNum2CoreFCC(UINT8 chipType, UINT8 emuType, bool* isSubType)
+UINT32 EmuTypeNum2CoreFCC(UINT8 chipType, UINT8 emuType)
 {
-	if (isSubType != NULL)
-		*isSubType = false;
 	switch(chipType)
 	{
 	case DEVID_SN76496:
@@ -208,16 +207,6 @@ UINT32 EmuTypeNum2CoreFCC(UINT8 chipType, UINT8 emuType, bool* isSubType)
 			return FCC_MAME;
 		else if (emuType == 1)
 			return FCC_NUKE;
-		break;
-	case DEVID_YM2203:
-	case DEVID_YM2608:
-	case DEVID_YM2610:
-		if (isSubType != NULL)
-			*isSubType = true;
-		if (emuType == 0)
-			return FCC_EMU_;
-		else if (emuType == 1)
-			return FCC_MAME;
 		break;
 	case DEVID_YM3812:
 		if (emuType == 0)
@@ -336,9 +325,34 @@ static void LoadCfg_General(GeneralOptions& opts)
 	return;
 }
 
+static UINT8 GetSoundCorePanAvailability(const DEV_DECL* devDecl)
+{
+	UINT8 result = 0x00;
+	
+	for (UINT8 emuType = 0; emuType < 8; emuType ++)
+	{
+		UINT32 emuFcc = EmuTypeNum2CoreFCC(devDecl->deviceID, emuType);
+		if (! emuFcc)
+			break;
+		for (const DEV_DEF* const* coreDef = devDecl->cores; *coreDef != NULL; coreDef ++)
+		{
+			if ((*coreDef)->coreID == emuFcc)
+			{
+				void* func = NULL;
+				SndEmu_GetDeviceFunc(*coreDef, RWF_CHN_PAN | RWF_WRITE, DEVRW_ALL, 0, &func);
+				if (func != NULL)
+					result |= 1 << emuType;
+				break;
+			}
+		}
+	}
+	
+	return result;
+}
+
 static void LoadCfg_ChipSection(ChipOptions& opts, const char* chipName)
 {
-	const UINT8 chipType = opts.chipType;
+	const DEV_ID chipType = opts.chipType;
 	char tempStr[0x80];
 	
 	// parse muting options
@@ -349,36 +363,37 @@ static void LoadCfg_ChipSection(ChipOptions& opts, const char* chipName)
 	opts.muteMask[0]	= ReadIniDef_Integer("Muting",	tempStr,	0);
 	sprintf(tempStr, "%s #%u_%u", chipName, opts.chipInstance, 2);
 	opts.muteMask[1]	= ReadIniDef_Integer("Muting",	tempStr,	0);
-#if 0
+	
+	opts.chipTypeSub = (DEV_ID)-1;
+	if (chipType == DEVID_YM2203 || chipType == DEVID_YM2608 || chipType == DEVID_YM2610)
+		opts.emuTypeID = 1;
+	else
+		opts.emuTypeID = 0;
+	
 	{
-		UINT32 ayMute;
-		sprintf(tempStr, "%s #%u_%u", chipName, opts.chipInstance, 3);
-		ayMute				= ReadIniDef_Integer("Muting",	tempStr,	0);
+		const DEV_DECL* devDecl = SndEmu_GetDevDecl(chipType, NULL, 0x00);
+		opts.muteChnCnt[0] = (devDecl != NULL) ? devDecl->channelCount(NULL) : 0;
+		opts.muteChnCnt[1] = 0;
+		opts.corePanMask[0] = GetSoundCorePanAvailability(devDecl);
+		opts.corePanMask[1] = 0x00;
 		
-		if (chipType == DEVID_YM2203 || chipType == DEVID_YM2608 || chipType == DEVID_YM2610)
+		const DEVLINK_IDS* dlIDs = devDecl->linkDevIDs(NULL);
+		if (dlIDs != NULL && dlIDs->devCount != 0)
 		{
-			opts.muteMask[0] |= (opts.muteMask[1] << 6);	// move ADPCM mute mask into primary array
-			opts.muteMask[1] = ayMute;
+			const DEV_DECL* devDecLink = SndEmu_GetDevDecl(dlIDs->devIDs[0], NULL, 0x00);
+			if (devDecLink != NULL)
+			{
+				opts.chipTypeSub = devDecLink->deviceID;
+				opts.muteChnCnt[1] = devDecLink->channelCount(NULL);
+				opts.corePanMask[1] = GetSoundCorePanAvailability(devDecLink);
+			}
 		}
-	}
-#endif
-	{
-		// TODO: don't hardcode this
-		opts.chnCnt[0] = 0;
-		opts.chnCnt[1] = 0;
-		if (chipType == DEVID_SN76496)
-			opts.chnCnt[0] = 4;
-		else if (chipType == DEVID_YM2413)
-			opts.chnCnt[0] = 9 + 5;
-		else if (chipType == DEVID_AY8910)
-			opts.chnCnt[0] = 3;
-		else if (chipType == DEVID_YM2203 || chipType == DEVID_YM2608 || chipType == DEVID_YM2610)
-			opts.chnCnt[1] = 3;
 		
 		for (UINT8 subChip = 0; subChip < 2; subChip++)
 		{
-			int digits = (opts.chnCnt[subChip] < 10) ? 1 : 2;
-			for (UINT8 curChn = 0; curChn < opts.chnCnt[subChip]; curChn ++)
+			opts.panChnCnt[subChip] = opts.corePanMask[subChip] ? opts.muteChnCnt[subChip] : 0;	// allow panning when at least one of the cores supports it
+			int digits = (opts.panChnCnt[subChip] < 10) ? 1 : 2;
+			for (UINT8 curChn = 0; curChn < opts.panChnCnt[subChip]; curChn ++)
 			{
 				if (subChip == 0)
 					sprintf(tempStr, "%s #%u %0*u", chipName, opts.chipInstance, digits, curChn);
@@ -399,12 +414,8 @@ static void LoadCfg_ChipSection(ChipOptions& opts, const char* chipName)
 		if (emuType != 0xFF)
 		{
 			// select emuCore based on number
-			bool subType;
-			UINT32 coreFCC = EmuTypeNum2CoreFCC(opts.chipType, emuType, &subType);
-			if (subType)
-				opts.emuCoreSub = coreFCC;
-			else
-				opts.emuCore = coreFCC;
+			DEV_ID devID = opts.emuTypeID ? opts.chipTypeSub : opts.chipType;
+			opts.emuCore[opts.emuTypeID] = EmuTypeNum2CoreFCC(devID, emuType);
 		}
 	}
 	{
@@ -413,12 +424,12 @@ static void LoadCfg_ChipSection(ChipOptions& opts, const char* chipName)
 		ReadIni_String    ("EmuCore",		chipName,	tempStr, 0x10);	coreStr = tempStr;
 		// ignore empty strings - and the ones with only 1 character (old-style number)
 		if (coreStr.size() > 1)
-			opts.emuCore = Str2FCC(coreStr);
+			opts.emuCore[0] = Str2FCC(coreStr);
 		
 		tempStr[0] = '\0';
 		ReadIni_String    ("EmuCoreSub",	chipName,	tempStr, 0x10);	coreStr = tempStr;
 		if (! coreStr.empty())
-			opts.emuCoreSub = Str2FCC(coreStr);
+			opts.emuCore[1] = Str2FCC(coreStr);
 	}
 	
 	// chip-specific options
@@ -550,16 +561,15 @@ static void SaveCfg_ChipSection(const ChipOptions& opts, const char* chipName)
 	char tempStr[0x80];
 	
 	WriteIni_Integer("EmuCore",	chipName,	opts.emuType);
-	//WriteIni_String ("EmuCore",		chipName,	FCC2Str(opts.emuCore).c_str());
-	//WriteIni_String ("EmuCoreSub",	chipName,	FCC2Str(opts.emuCoreSub).c_str());
+	//WriteIni_String ("EmuCore",		chipName,	FCC2Str(opts.emuCore[0]).c_str());
+	//WriteIni_String ("EmuCoreSub",	chipName,	FCC2Str(opts.emuCore[1]).c_str());
 	
 	sprintf(tempStr, "%s #%u All", chipName, opts.chipInstance);
 	WriteIni_Boolean("Muting",	tempStr,	!!opts.chipDisable);
 	
 	sprintf(tempStr, "%s #%u", chipName, opts.chipInstance);
 	WriteIni_XInteger("Muting",	tempStr,	opts.muteMask[0]);
-	if (chipType == DEVID_YM2203 || chipType == DEVID_YM2608 || chipType == DEVID_YM2610 ||
-		chipType == DEVID_YMF278B)
+	if (opts.muteChnCnt[1] > 0)
 	{
 		sprintf(tempStr, "%s #%u_%u", chipName, opts.chipInstance, 2);
 		WriteIni_XInteger("Muting",	tempStr,	opts.muteMask[1]);
@@ -568,8 +578,8 @@ static void SaveCfg_ChipSection(const ChipOptions& opts, const char* chipName)
 	{
 		for (UINT8 subChip = 0; subChip < 2; subChip++)
 		{
-			int digits = (opts.chnCnt[subChip] < 10) ? 1 : 2;
-			for (UINT8 curChn = 0; curChn < opts.chnCnt[subChip]; curChn ++)
+			int digits = (opts.panChnCnt[subChip] < 10) ? 1 : 2;
+			for (UINT8 curChn = 0; curChn < opts.panChnCnt[subChip]; curChn ++)
 			{
 				if (subChip == 0)
 					sprintf(tempStr, "%s #%u %0*u", chipName, opts.chipInstance, digits, curChn);
@@ -733,8 +743,8 @@ void ApplyCfg_Chip(PlayerA& player, const GeneralOptions& gOpts, const ChipOptio
 		if (retVal)
 			continue;	// this player doesn't support this chip
 		
-		devOpts.emuCore[0] = cOpts.emuCore;
-		devOpts.emuCore[1] = cOpts.emuCoreSub;
+		devOpts.emuCore[0] = cOpts.emuCore[0];
+		devOpts.emuCore[1] = cOpts.emuCore[1];
 		devOpts.srMode = ConvertChipSmplModeOption(cOpts.chipType, gOpts.chipSmplMode);
 		devOpts.resmplMode = gOpts.resmplMode;
 		devOpts.smplRate = gOpts.chipSmplRate;

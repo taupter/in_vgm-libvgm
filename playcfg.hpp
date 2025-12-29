@@ -6,6 +6,8 @@
 #include <vector>
 #include <array>
 
+#include <emu/EmuStructs.h>	// for DEV_ID
+
 struct GeneralOptions
 {
 	UINT32 smplRate;
@@ -48,13 +50,16 @@ struct GeneralOptions
 struct ChipOptions
 {
 	const char* cfgEntryName;
-	UINT8 chipType;
+	DEV_ID chipType;
+	DEV_ID chipTypeSub;
 	UINT8 chipInstance;
 	UINT8 chipDisable;	// bit mask, bit 0 (01) = main, bit 1 (02) = linked
-	UINT32 emuCore;
-	UINT32 emuCoreSub;
+	UINT8 emuTypeID;	// emuType affects emuCore[emuTypeID]
 	UINT8 emuType;		// TODO: remove and use emuCore/emuCoreSub instead
-	UINT8 chnCnt[2];	// for now this is only used by panning code
+	UINT8 corePanMask[2];	// sound cores that allow for panning (bit 0 = 1st core, bit 1 = 2nd core, ...)
+	UINT32 emuCore[2];
+	UINT16 muteChnCnt[2];
+	UINT16 panChnCnt[2];
 	UINT32 muteMask[2];
 	INT16 panMask[2][32];	// scale: -0x100 .. 0 .. +0x100
 	UINT32 addOpts;
@@ -68,7 +73,7 @@ struct PluginConfig
 class PlayerA;
 
 
-UINT32 EmuTypeNum2CoreFCC(UINT8 chipType, UINT8 emuType, bool* isSubType);
+UINT32 EmuTypeNum2CoreFCC(UINT8 chipType, UINT8 emuType);
 
 void LoadConfiguration(PluginConfig& pCfg, const char* iniFileName);
 void SaveConfiguration(const PluginConfig& pCfg, const char* iniFileName);

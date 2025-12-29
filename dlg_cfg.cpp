@@ -721,19 +721,17 @@ static BOOL CALLBACK CfgDlgOptPanProc(HWND hWndDlg, UINT wMessage, WPARAM wParam
 		case EmuCoreRadio3:
 		{
 			ChipOptions* cOpts = &pluginCfg.chipOpts[muteChipID][0];
-			bool isSub;
 			
 			cOpts[0].emuType = LOWORD(wParam) - EmuCoreRadio1;
-			UINT32 fcc = EmuTypeNum2CoreFCC(cOpts[0].chipType, cOpts[0].emuType, &isSub);
-			if (isSub)
-				cOpts[0].emuCoreSub = fcc;
+			if (cOpts[0].emuTypeID)
+				cOpts[0].emuCore[cOpts[0].emuTypeID] = EmuTypeNum2CoreFCC(cOpts[0].chipTypeSub, cOpts[0].emuType);
 			else
-				cOpts[0].emuCore = fcc;
+				cOpts[0].emuCore[cOpts[0].emuTypeID] = EmuTypeNum2CoreFCC(cOpts[0].chipType, cOpts[0].emuType);
 			
 			// currently EmuCore affects both chip instances
 			cOpts[1].emuType = cOpts[0].emuType;
-			cOpts[1].emuCore = cOpts[0].emuCore;
-			cOpts[1].emuCoreSub = cOpts[0].emuCoreSub;
+			cOpts[1].emuCore[0] = cOpts[0].emuCore[0];
+			cOpts[1].emuCore[1] = cOpts[0].emuCore[1];
 			// enable/disable panning sliders, depending on the core's features
 			ShowOptPanBoxes(muteChipID, muteChipSet);
 			break;
@@ -822,8 +820,9 @@ static bool IsChipAvailable(const ChipOptions& cOpts)
 
 static UINT32 GetChipCore(const ChipOptions& cOpts)
 {
+	DEV_ID chipType = cOpts.emuTypeID ? cOpts.chipTypeSub : cOpts.chipType;
 	if (! IsSongPlaying())
-		return EmuTypeNum2CoreFCC(cOpts.chipType, cOpts.emuType, NULL);
+		return EmuTypeNum2CoreFCC(chipType, cOpts.emuType);
 	
 	PlayerBase* plr = GetMainPlayerFIS()->GetPlayer()->GetPlayer();
 	std::vector<PLR_DEV_INFO> diList;
@@ -834,8 +833,10 @@ static UINT32 GetChipCore(const ChipOptions& cOpts)
 		const PLR_DEV_INFO& pdi = diList[curDev];
 		if (pdi.type == cOpts.chipType && pdi.instance == cOpts.chipInstance)
 		{
-			if (pdi.type == DEVID_YM2203 || pdi.type == DEVID_YM2608 || pdi.type == DEVID_YM2610)
-				return EmuTypeNum2CoreFCC(cOpts.chipType, cOpts.emuType, NULL);	// TODO: return sub-core
+			if (cOpts.emuTypeID && pdi.devLink.size() >= 1)
+				return pdi.devLink[0].core;
+			else if (cOpts.emuTypeID)
+				return EmuTypeNum2CoreFCC(chipType, cOpts.emuType);
 			else
 				return pdi.core;
 		}
@@ -846,7 +847,6 @@ static UINT32 GetChipCore(const ChipOptions& cOpts)
 
 static void ShowMutingCheckBoxes(UINT8 ChipID, UINT8 ChipSet)
 {
-	UINT16 ChnCount;
 	UINT16 ChnCntS[4];
 	const char* SpcName[64];	// Special Channel Names
 	const char* SpcRngName[4];	// Special Channel Range Names
@@ -854,9 +854,6 @@ static void ShowMutingCheckBoxes(UINT8 ChipID, UINT8 ChipSet)
 	UINT8 SpcModes;
 	bool EnableChk;
 	bool Checked;
-	UINT8 CurMode;
-	UINT16 ChnBase;
-	UINT16 FnlChn;
 	char TempName[0x18];
 	
 	for (CurChn = 0; CurChn < 64; CurChn ++)
@@ -870,13 +867,7 @@ static void ShowMutingCheckBoxes(UINT8 ChipID, UINT8 ChipSet)
 	
 	EnableChk = IsChipAvailable(*muteCOpts);
 	SpcModes = 0;
-	{
-		// get channel count from libvgm
-		const DEV_DECL* const* devPtr = sndEmu_Devices;
-		while(*devPtr != NULL && (*devPtr)->deviceID != muteCOpts->chipType)
-			devPtr ++;
-		ChnCount = (devPtr != NULL) ? (*devPtr)->channelCount(NULL) : 0;
-	}
+	
 	// handle special channel names
 	switch(muteCOpts->chipType)
 	{
@@ -900,12 +891,11 @@ static void ShowMutingCheckBoxes(UINT8 ChipID, UINT8 ChipSet)
 		break;
 	case DEVID_YM2203:
 		SpcModes = 3;
-		ChnCntS[0] = 3;	// 3x FM
+		ChnCntS[0] = muteCOpts->muteChnCnt[0];	// FM channels
 		SpcRngName[0] = "FM Chn";
 		ChnCntS[1] = 0;
-		ChnCntS[2] = 3;		// 3x SSG
+		ChnCntS[2] = muteCOpts->muteChnCnt[1];	// SSG channels
 		SpcRngName[2] = "SSG Chn";
-		ChnCount = ChnCntS[0] + ChnCntS[1] + ChnCntS[2];
 		break;
 	case DEVID_YM2608:
 	case DEVID_YM2610:
@@ -915,9 +905,8 @@ static void ShowMutingCheckBoxes(UINT8 ChipID, UINT8 ChipSet)
 		ChnCntS[1] = 7;	// 6x ADPCM-A + 1x DeltaT
 		SpcRngName[1] = "PCM Chn";
 		SpcName[14] = "&Delta-T";
-		ChnCntS[2] = 3;	// 3x SSG
+		ChnCntS[2] = muteCOpts->muteChnCnt[1];	// SSG channels
 		SpcRngName[2] = "SSG Chn";
-		ChnCount = ChnCntS[0] + ChnCntS[1] + ChnCntS[2];
 		break;
 	case DEVID_YMF262:
 		SpcName[18] = "&Bass Drum";
@@ -950,15 +939,16 @@ static void ShowMutingCheckBoxes(UINT8 ChipID, UINT8 ChipSet)
 		EnableChk &= ! ChipSet;
 		break;
 	}
-	if (ChnCount == 0)
+	if (muteCOpts->muteChnCnt[0] == 0)
 		EnableChk = false;
-	else if (ChnCount > 24)
-		ChnCount = 24;	// currently only 24 checkboxes are supported
 	
 	SETCHECKBOX(CfgMuting, MuteChipCheck, muteCOpts->chipDisable);
 	CTRL_SET_ENABLE(CfgMuting, MuteChipCheck, EnableChk);
-	if (! SpcModes)
+	if (SpcModes == 0)
 	{
+		UINT16 ChnCount = muteCOpts->muteChnCnt[0];
+		if (ChnCount > 24)
+			ChnCount = 24;	// currently only 24 checkboxes are supported
 		for (CurChn = 0; CurChn < ChnCount; CurChn ++)
 		{
 			if (SpcName[CurChn] == NULL)
@@ -985,9 +975,11 @@ static void ShowMutingCheckBoxes(UINT8 ChipID, UINT8 ChipSet)
 	}
 	else
 	{
+		UINT16 FnlChn;
+		UINT8 CurMode;
 		for (CurMode = 0; CurMode < SpcModes; CurMode ++)
 		{
-			ChnBase = CurMode * 8;
+			UINT16 ChnBase = CurMode * 8;
 			if (SpcRngName[CurMode] == NULL)
 				SpcRngName[CurMode] = "Channel";
 			
@@ -1047,7 +1039,7 @@ static void ShowMutingCheckBoxes(UINT8 ChipID, UINT8 ChipSet)
 
 static void SetMutingData(UINT32 CheckBox, bool MuteOn)
 {
-	UINT8 ChnCntS[0x04];
+	UINT16 ChnCntS[0x04];
 	UINT8 SpcModes;
 	UINT8 maskID;
 	UINT8 chnID;
@@ -1057,21 +1049,21 @@ static void SetMutingData(UINT32 CheckBox, bool MuteOn)
 	{
 	case DEVID_YM2203:
 		SpcModes = 3;
-		ChnCntS[0] = 3;	// 3x FM
+		ChnCntS[0] = muteCOpts->muteChnCnt[0];	// FM channels
 		ChnCntS[1] = 0;
-		ChnCntS[2] = 3;	// 3x SSG
+		ChnCntS[2] = muteCOpts->muteChnCnt[1];	// SSG channels
 		break;
 	case DEVID_YM2608:
 	case DEVID_YM2610:
 		SpcModes = 3;
 		ChnCntS[0] = 6;	// 6x FM
 		ChnCntS[1] = 7;	// 6x ADPCM-A + 1x DeltaT
-		ChnCntS[2] = 3;	// 3x SSG
+		ChnCntS[2] = muteCOpts->muteChnCnt[1];	// SSG channels
 		break;
 	}
 	
 	maskID = 0xFF;
-	if (! SpcModes)
+	if (SpcModes == 0)
 	{
 		maskID = 0;
 		if (muteCOpts->chipType == DEVID_YMF278B)
@@ -1119,8 +1111,8 @@ static inline INT16 PanSlider2Pos(UINT16 sliderValue)
 
 static void ShowOptPanBoxes(UINT8 ChipID, UINT8 ChipSet)
 {
-	UINT8 ChnCount;
-	UINT8 CurChn;
+	UINT16 ChnCount;
+	UINT16 CurChn;
 	const char* SpcName[32];	// Special Channel Names
 	const char* CoreName[3];	// Names for the Emulation Cores
 	bool EnableChk;
@@ -1143,15 +1135,16 @@ static void ShowOptPanBoxes(UINT8 ChipID, UINT8 ChipSet)
 	curEmuCore = GetChipCore(*muteCOpts);
 	
 	coreCnt = 0;
-	panMaskID = 0xFF;
+	if (muteCOpts->corePanMask[muteCOpts->emuTypeID] & (1 << muteCOpts->emuType))
+		panMaskID = muteCOpts->emuTypeID;	// allow panning only for sound cores that support it
+	else
+		panMaskID = 0xFF;
 	switch(muteCOpts->chipType)
 	{
 	case DEVID_SN76496:
 		CoreName[0] = "MAME";
 		CoreName[1] = "Maxim";
 		coreCnt = 2;
-		if (curEmuCore == FCC_MAXM)
-			panMaskID = 0;
 		
 		SpcName[3] = "&N";
 		break;
@@ -1160,8 +1153,6 @@ static void ShowOptPanBoxes(UINT8 ChipID, UINT8 ChipSet)
 		CoreName[1] = "MAME";
 		CoreName[2] = "Nuked OPLL";
 		coreCnt = 3;
-		if (curEmuCore == FCC_EMU_)
-			panMaskID = 0;
 		
 		SpcName[ 9] = "&BD";
 		SpcName[10] = "S&D";
@@ -1186,8 +1177,6 @@ static void ShowOptPanBoxes(UINT8 ChipID, UINT8 ChipSet)
 		CoreName[0] = "EMU2149";
 		CoreName[1] = "MAME";
 		coreCnt = 2;
-		if (curEmuCore == FCC_EMU_)
-			panMaskID = 1;
 		
 		SpcName[0] = "S&1";
 		SpcName[1] = "S&2";
@@ -1210,13 +1199,18 @@ static void ShowOptPanBoxes(UINT8 ChipID, UINT8 ChipSet)
 		CoreName[0] = "EMU2149";
 		CoreName[1] = "MAME";
 		coreCnt = 2;
-		if (curEmuCore == FCC_EMU_)
-			panMaskID = 0;
 		break;
 	case DEVID_NES_APU:
 		CoreName[0] = "NSFPlay";
 		CoreName[1] = "MAME";
 		coreCnt = 2;
+		
+		SpcName[0] = "S&1";
+		SpcName[1] = "S&2";
+		SpcName[2] = "&T";
+		SpcName[3] = "&N";
+		SpcName[4] = "&D";
+		SpcName[5] = "&F";
 		break;
 	case DEVID_C6280:
 		CoreName[0] = "Ootake";
@@ -1236,17 +1230,20 @@ static void ShowOptPanBoxes(UINT8 ChipID, UINT8 ChipSet)
 	case DEVID_C352:
 		CoreName[0] = "superctr";
 		break;
+	case DEVID_VBOY_VSU:
+		CoreName[0] = "Mednafen";
+		break;
 	case DEVID_MIKEY:
 		CoreName[0] = "laoo";
 		break;
+	case DEVID_MSM5205:
+		CoreName[0] = "eito";
+		break;
 	default:
-		EnableChk = false;
 		break;
 	}
-	if (panMaskID != 0xFF && ! muteCOpts->chnCnt[panMaskID])
-		panMaskID = 0xFF;
 	
-	ChnCount = (panMaskID != 0xFF) ? muteCOpts->chnCnt[panMaskID] : 0;
+	ChnCount = (panMaskID != 0xFF) ? muteCOpts->panChnCnt[panMaskID] : 0;
 	if (ChnCount > 15)
 		ChnCount = 15;	// there are only 15 sliders
 	
@@ -1309,27 +1306,8 @@ static void ShowOptPanBoxes(UINT8 ChipID, UINT8 ChipSet)
 
 static void SetPanningData(UINT32 sliderID, UINT16 value, bool noRefresh)
 {
-	UINT8 panMaskID = 0xFF;
-	switch(muteCOpts->chipType)
-	{
-	case DEVID_SN76496:
-		panMaskID = 0;
-		break;
-	case DEVID_YM2413:
-		panMaskID = 0;
-		break;
-	case DEVID_YM2203:
-	case DEVID_YM2608:
-	case DEVID_YM2610:
-		panMaskID = 1;
-		break;
-	case DEVID_AY8910:
-		panMaskID = 0;
-		break;
-	}
-	if (panMaskID == 0xFF)
-		return;
-	if (sliderID >= muteCOpts->chnCnt[panMaskID])
+	UINT8 panMaskID = muteCOpts->emuTypeID;
+	if (sliderID >= muteCOpts->panChnCnt[panMaskID])
 		return;
 	
 	muteCOpts->panMask[panMaskID][sliderID] = PanSlider2Pos(value);
