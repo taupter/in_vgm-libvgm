@@ -60,7 +60,7 @@ void SaveConfiguration(const PluginConfig& pCfg, const char* iniFileName);
 static void SaveCfg_General(const GeneralOptions& opts);
 static void SaveCfg_ChipSection(const ChipOptions& opts, const char* chipName);
 
-void ApplyCfg_General(PlayerA& player, const GeneralOptions& opts);
+void ApplyCfg_General(PlayerA& player, const GeneralOptions& opts, bool noLiveOpts);
 void ApplyCfg_Chip(PlayerA& player, const GeneralOptions& gOpts, const ChipOptions& cOpts);
 
 
@@ -111,6 +111,11 @@ static const ChipCfgSectDef CFG_CHIP_LIST[] =
 	{	DEVID_GA20,		"GA20"},
 	{	DEVID_MIKEY,	"Mikey"},
 	{	DEVID_K007232,	"K007232"},
+	{	DEVID_K005289,	"K005289"},
+	{	DEVID_MSM5205,	"MSM5205"},
+	{	DEVID_MSM5232,	"MSM5232"},
+	{	DEVID_BSMT2000,	"BSMT2000"},
+	{	DEVID_ICS2115,	"ICS2115"},
 };
 static const size_t CFG_CHIP_COUNT = sizeof(CFG_CHIP_LIST) / sizeof(CFG_CHIP_LIST[0]);
 
