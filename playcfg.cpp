@@ -259,6 +259,20 @@ UINT32 EmuTypeNum2CoreFCC(UINT8 chipType, UINT8 emuType)
 	return 0x00;
 }
 
+UINT8 CoreFCC2EmuTypeNum(UINT8 chipType, UINT32 coreFCC)
+{
+	UINT8 emuType;
+	for (emuType = 0; emuType < 8; emuType ++)
+	{
+		UINT32 fcc = EmuTypeNum2CoreFCC(chipType, emuType);
+		if (fcc == 0)
+			break;
+		if (fcc == coreFCC)
+			return emuType;
+	}
+	return 0;	// return default core number
+}
+
 void LoadConfiguration(PluginConfig& pCfg, const char* iniFileName)
 {
 	size_t curChp;
@@ -409,8 +423,8 @@ static void LoadCfg_ChipSection(ChipOptions& opts, const char* chipName)
 	opts.chipDisable = chipMute ? 0xFF : 0x00;
 	
 	{
-		UINT8 emuType = ReadIniDef_IntByte("EmuCore",	chipName,	/*0xFF*/0);
-		opts.emuType = emuType;
+		// fallback for old-style EmuCore number (placed here to take lower priority than text-based selection)
+		UINT8 emuType = ReadIniDef_IntByte("EmuCore",	chipName,	0xFF);
 		if (emuType != 0xFF)
 		{
 			// select emuCore based on number
@@ -560,9 +574,9 @@ static void SaveCfg_ChipSection(const ChipOptions& opts, const char* chipName)
 	const UINT8 chipType = opts.chipType;
 	char tempStr[0x80];
 	
-	WriteIni_Integer("EmuCore",	chipName,	opts.emuType);
-	//WriteIni_String ("EmuCore",		chipName,	FCC2Str(opts.emuCore[0]).c_str());
-	//WriteIni_String ("EmuCoreSub",	chipName,	FCC2Str(opts.emuCore[1]).c_str());
+	WriteIni_String ("EmuCore",		chipName,	FCC2Str(opts.emuCore[0]).c_str());
+	if (opts.emuCore[1] != 0)	// write CoreSub only when set (prevents writing for chips without sub-devices)
+		WriteIni_String ("EmuCoreSub",	chipName,	FCC2Str(opts.emuCore[1]).c_str());
 	
 	sprintf(tempStr, "%s #%u All", chipName, opts.chipInstance);
 	WriteIni_Boolean("Muting",	tempStr,	!!opts.chipDisable);

@@ -55,7 +55,6 @@ struct ChipOptions
 	UINT8 chipInstance;
 	UINT8 chipDisable;	// bit mask, bit 0 (01) = main, bit 1 (02) = linked
 	UINT8 emuTypeID;	// emuType affects emuCore[emuTypeID]
-	UINT8 emuType;		// TODO: remove and use emuCore/emuCoreSub instead
 	UINT8 corePanMask[2];	// sound cores that allow for panning (bit 0 = 1st core, bit 1 = 2nd core, ...)
 	UINT32 emuCore[2];
 	UINT16 muteChnCnt[2];
@@ -74,6 +73,7 @@ class PlayerA;
 
 
 UINT32 EmuTypeNum2CoreFCC(UINT8 chipType, UINT8 emuType);
+UINT8 CoreFCC2EmuTypeNum(UINT8 chipType, UINT32 coreFCC);
 
 void LoadConfiguration(PluginConfig& pCfg, const char* iniFileName);
 void SaveConfiguration(const PluginConfig& pCfg, const char* iniFileName);
