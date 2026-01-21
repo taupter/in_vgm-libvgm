@@ -268,10 +268,11 @@ void FileInfoStorage::GenerateChipList(void)
 	for (size_t curDev = 0; curDev < _songInfo.chipList.size(); curDev ++)
 	{
 		const PLR_DEV_INFO& pdi = _songInfo.chipList[curDev];
-		const char* chipName;
-		unsigned int devCnt = 1;
+		if (pdi.parentIdx != (UINT32)-1)
+			continue;	// skip linked/child devices
 		
-		chipName = SndEmu_GetDevName(pdi.type, 0x01, pdi.devCfg);
+		const char* chipName = SndEmu_GetDevName(pdi.type, 0x01, pdi.devCfg);
+		unsigned int devCnt;
 		for (devCnt = 1; curDev + 1 < _songInfo.chipList.size(); curDev ++, devCnt ++)
 		{
 			const PLR_DEV_INFO& pdi1 = _songInfo.chipList[curDev + 1];

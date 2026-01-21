@@ -831,18 +831,18 @@ static UINT32 GetChipCore(const ChipOptions& cOpts)
 	for (size_t curDev = 0; curDev < diList.size(); curDev ++)
 	{
 		const PLR_DEV_INFO& pdi = diList[curDev];
-		if (pdi.type == cOpts.chipType && pdi.instance == cOpts.chipInstance)
-		{
-			if (cOpts.emuTypeID && pdi.devLink.size() >= 1)
-				return pdi.devLink[0].core;
-			else if (cOpts.emuTypeID)
-				return EmuTypeNum2CoreFCC(chipType, cOpts.emuType);
-			else
-				return pdi.core;
-		}
+		const PLR_DEV_INFO* pdRef = NULL;
+		
+		if (cOpts.emuTypeID == 0 && pdi.parentIdx == (UINT32)-1)
+			pdRef = &pdi;	// main device
+		else if (cOpts.emuTypeID == 1 && pdi.parentIdx == 0)
+			pdRef = &diList[pdi.parentIdx];	// linked device - compare to type/instance from parent
+		
+		if (pdRef != NULL && pdRef->type == cOpts.chipType && pdRef->instance == cOpts.chipInstance)
+			return pdi.core;	// return the core of parent or linked device
 	}
-	// return magic number for "not found" (avoid 0, just in case it is used by some core)
-	return 0xFFFFFFFF;
+	
+	return EmuTypeNum2CoreFCC(chipType, cOpts.emuType);	// unused device - fall back to generic core info
 }
 
 static void ShowMutingCheckBoxes(UINT8 ChipID, UINT8 ChipSet)
