@@ -15,8 +15,8 @@
 
 #endif
 
-#define VGMPLAY_VER_STR	"0.51.1"
-#define VGM_VER_STR		"1.72b"
+#define VGMPLAY_VER_STR	"0.52.0"
+#define VGM_VER_STR		"1.72"
 #define INVGM_VERSION		VGMPLAY_VER_STR VER_EXTRA
 #define INVGM_TITLE			"VGM Input Plugin v" INVGM_VERSION
 #define INVGM_TITLE_FULL	"VGM Input Plugin v" INVGM_VERSION VER_DATE
